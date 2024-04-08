@@ -1,55 +1,69 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, render_template_string, request, redirect, url_for
 import boto3
-from botocore.exceptions import NoCredentialsError
+from werkzeug.utils import secure_filename
+import requests
 
-app = Flask(__name__)
+# Initialize Flask application
+web_app = Flask(__name__)
 
-# AWS S3 Configuration
-AWS_ACCESS_KEY_ID = 'AKIA47CRWVGW27WJ42GV'
-AWS_SECRET_ACCESS_KEY = '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'
-REGION_NAME = 'us-east-1'
+# AWS S3 bucket configuration
+bucket_image = 'term-assignment-image-recog'
 
-s3_resource = boto3.resource(
-    's3',
-    aws_access_key_id=AWS_ACCESS_KEY_ID,
-    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-    region_name=REGION_NAME
-)
+# AWS Clients
+aws_s3_client = boto3.client('s3')
+aws_api_client = boto3.client('', region_name='us-east-2')
 
-# Predetermined bucket name
-BUCKET_NAME = 'image-anaysis'
-
-# HTML Form
-HTML = '''
+# HTML templates for the web interface
+Image_upload = """
 <!doctype html>
-<title>Upload to S3</title>
-<h2>Upload a file to S3</h2>
-<form method=post enctype=multipart/form-data>
-  File: <input type=file name=file>
-  <input type=submit value=Upload>
+<html>
+<head><title>Upload image</title></head>
+<body>
+<h2>Upload image</h2>
+<form action="/upload" method="post" enctype="multipart/form-data">
+    <input type="file" name="document" accept=".pdf">
+    <button type="submit">Upload Image</button>
 </form>
-'''
+</body>
+</html>
+"""
 
-@app.route('/', methods=['GET', 'POST'])
-def upload_file():
-    if request.method == 'POST':
-        file = request.files['file']
-        if file:
-            # Create S3 bucket if it doesn't exist
-            if BUCKET_NAME not in [bucket.name for bucket in s3_resource.buckets.all()]:
-                try:
-                    s3_resource.create_bucket(Bucket=BUCKET_NAME, CreateBucketConfiguration={
-                        'LocationConstraint': REGION_NAME})
-                    print(f"Bucket {BUCKET_NAME} created successfully.")
-                except s3_resource.meta.client.exceptions.BucketAlreadyOwnedByYou:
-                    print(f"Bucket {BUCKET_NAME} already exists.")
-                except NoCredentialsError:
-                    return "Credentials not available", 403
-            
-            # Upload file to the specified bucket
-            s3_resource.Bucket(BUCKET_NAME).put_object(Key=file.filename, Body=file)
-            return f'File {file.filename} uploaded to {BUCKET_NAME}.'
-    return render_template_string(HTML)
+next_image = """
+<!doctype html>
+<html>
+<head><title>Success</title></head>
+<body>
+<h2>Upload Completed</h2>
+<a href="/">Upload Another</a>
+</body>
+</html>
+"""
+
+@web_app.route('/')
+def home():
+    return render_template_string(Image_upload)
+
+@web_app.route('/upload', methods=['POST'])
+def file_upload():
+    image_file = request.files.get('document')
+    if image_file and image_file.filename.endswith('.pdf'):
+        safe_name = secure_filename(image_file.filename)
+        try:
+            aws_s3_client.upload_fileobj(image_file, bucket_image, safe_name)
+            apis = aws_api_client.get_rest_apis()['items']
+            for api in apis:
+                if api['name'] == "SimpleApiGateway":
+                    process_url=f"https://{api['id']}.execute-api.us-east-2.amazonaws.com/prod"+"/service";
+            headers = {'Content-Type': 'application/json'}
+            payload = {"input_bucket": bucket_image, "input_bucket_file": safe_name}
+            result = requests.post(process_url, json=payload, headers=headers)
+            if result.status_code == 200:
+                return render_template_string(f"<h2>Processed successfully: {safe_name}</h2>")
+            else:
+                return render_template_string(next_image)
+        except Exception as error:
+            return str(error)
+    return redirect(url_for('home'))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    web_app.run(debug=True)
