@@ -10,8 +10,8 @@ web_app = Flask(__name__)
 bucket_image = 'term-assignment-image-recog'
 
 # AWS Clients
-aws_s3_client = boto3.client('s3')
-aws_api_client = boto3.client('', region_name='us-east-2')
+aws_s3_client = boto3.client('s3', region_name='us-east-2')
+
 
 # HTML templates for the web interface
 Image_upload = """
