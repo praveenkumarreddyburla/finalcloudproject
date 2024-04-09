@@ -71,6 +71,7 @@
 from flask import Flask, request, render_template_string, redirect, url_for
 import boto3
 from werkzeug.utils import secure_filename
+import requests
 
 app = Flask(__name__)
 
@@ -78,6 +79,7 @@ app = Flask(__name__)
 S3_BUCKET = 'term-assignment-image-recog'
 
 s3 = boto3.client('s3')
+aws_api_client=boto3.client('apigateway',region_name='us-east-2')
 
 UPLOAD_FORM = """
 <!doctype html>
@@ -119,6 +121,15 @@ def upload():
     filename = secure_filename(file.filename)
     try:
         s3.upload_fileobj(file, S3_BUCKET, filename)
+        apis = aws_api_client.get_rest_apis()['items']
+        for api in apis:
+            if api['name'] == "SimpleApiGateway":
+                process_url=f"https://{api['id']}.execute-api.us-east-2.amazonaws.com/prod"+"/service";
+                headers = {'Content-Type': 'application/json'}
+                payload = {"input_bucket": "term-assignment-image-recog" , "input_key": "dog.jpg" }
+                result = requests.post(process_url, json=payload, headers=headers)
+                if result.status_code == 200:
+                    return render_template_string(f"<h2>Processed successfully!!! </h2>")
         # Redirect to the success page
         return redirect(url_for('upload_success'))
     except Exception as e:
